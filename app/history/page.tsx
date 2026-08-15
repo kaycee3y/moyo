@@ -18,6 +18,10 @@ export default function HistoryPage() {
     setConversations(getConversations());
   }, []);
 
+  function openConversation(id: string) {
+    router.push(`/chat?id=${id}`);
+  }
+
   function deleteData() {
     deleteAllMoyoData();
     setConversations([]);
@@ -64,6 +68,7 @@ export default function HistoryPage() {
                 .map((conversation) => (
                   <button
                     key={conversation.id}
+                    onClick={() => openConversation(conversation.id)}
                     className="flex w-full items-center justify-between rounded-[1.5rem] bg-white p-5 text-left shadow-sm transition hover:scale-[1.01]"
                   >
                     <div className="min-w-0">
@@ -86,7 +91,6 @@ export default function HistoryPage() {
           </div>
         </section>
 
-        {/* Privacy */}
         <section className="border-t border-neutral-200 py-8">
           <p className="text-sm font-extrabold">
             Your data, your choice.
@@ -94,8 +98,8 @@ export default function HistoryPage() {
 
           <p className="mt-2 text-sm leading-6 text-neutral-500">
             MOYO doesn't require an account for this experience.
-            Your local conversation history can be permanently
-            deleted from this device at any time.
+            Your locally stored conversations and goals can be
+            permanently deleted from this device.
           </p>
 
           <button
@@ -107,7 +111,6 @@ export default function HistoryPage() {
           </button>
         </section>
 
-        {/* Confirmation */}
         {showDelete && (
           <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/30 p-4 sm:items-center">
             <div className="w-full max-w-md rounded-[2rem] bg-white p-7 shadow-2xl">
