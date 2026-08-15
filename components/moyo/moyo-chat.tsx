@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowLeft, ArrowUp, History, Plus, Target } from "lucide-react";
+import { ArrowLeft, ArrowUp, Plus, Target } from "lucide-react";
 import { useRouter } from "next/navigation";
 import MoodFace from "./mood-face";
 
@@ -32,19 +32,35 @@ export default function MoyoChat() {
   function detectMood(text: string): Mood {
     const value = text.toLowerCase();
 
-    if (/happy|excited|great|amazing|wonderful|joy|love|proud|good news/.test(value)) {
+    if (
+      /happy|excited|great|amazing|wonderful|joy|love|proud|good news/.test(
+        value
+      )
+    ) {
       return "happy";
     }
 
-    if (/sad|cry|crying|hurt|lonely|upset|depressed|heartbroken|terrible|awful/.test(value)) {
+    if (
+      /sad|cry|crying|hurt|lonely|upset|depressed|heartbroken|terrible|awful/.test(
+        value
+      )
+    ) {
       return "sad";
     }
 
-    if (/confused|confusing|don't understand|what does|why does|unsure/.test(value)) {
+    if (
+      /confused|confusing|don't understand|what does|why does|unsure/.test(
+        value
+      )
+    ) {
       return "confused";
     }
 
-    if (/how do i|how can i|should i|what should|plan|goal|start|figure out/.test(value)) {
+    if (
+      /how do i|how can i|should i|what should|plan|goal|start|figure out/.test(
+        value
+      )
+    ) {
       return "thinking";
     }
 
@@ -58,7 +74,7 @@ export default function MoyoChat() {
 
     const updated = [
       ...messages,
-      { from: "user", text: trimmed },
+      { from: "user" as const, text: trimmed },
     ];
 
     setMood(detectMood(trimmed));
@@ -112,19 +128,23 @@ export default function MoyoChat() {
 
         {/* Header */}
         <header className="flex shrink-0 items-center justify-between px-4 py-4 sm:px-6">
+
+          {/* History */}
           <button
-            onClick={() => router.push("/")}
+            onClick={() => router.push("/history")}
             className="flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-sm transition hover:scale-105 sm:h-11 sm:w-11"
-            aria-label="Back"
+            aria-label="Conversation history"
           >
-            <ArrowLeft size={18} />
+            <span className="text-lg">☰</span>
           </button>
 
           <div className="text-lg font-extrabold tracking-[-0.06em]">
             MOYO
           </div>
 
+          {/* New conversation */}
           <button
+            onClick={() => router.push("/chat")}
             className="flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-sm transition hover:scale-105 sm:h-11 sm:w-11"
             aria-label="New conversation"
           >
@@ -137,7 +157,7 @@ export default function MoyoChat() {
           <MoodFace mood={mood} />
 
           {/* Mood controls */}
-          <div className="mt-2 flex max-w-full gap-2 overflow-x-auto px-2 pb-2 scrollbar-none">
+          <div className="mt-2 flex max-w-full gap-2 overflow-x-auto px-2 pb-2">
             {(Object.keys(moods) as Mood[]).map((item) => (
               <button
                 key={item}
@@ -157,11 +177,14 @@ export default function MoyoChat() {
         {/* Conversation */}
         <section className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
           <div className="mx-auto max-w-2xl space-y-3">
+
             {messages.map((item, index) => (
               <div
                 key={index}
                 className={`flex ${
-                  item.from === "user" ? "justify-end" : "justify-start"
+                  item.from === "user"
+                    ? "justify-end"
+                    : "justify-start"
                 }`}
               >
                 <div
@@ -179,16 +202,20 @@ export default function MoyoChat() {
             {loading && (
               <div className="flex justify-start">
                 <div className="rounded-[1.4rem] rounded-bl-md bg-white px-5 py-3 text-sm text-neutral-400 shadow-sm">
-                  <span className="animate-pulse">MOYO is thinking...</span>
+                  <span className="animate-pulse">
+                    MOYO is thinking...
+                  </span>
                 </div>
               </div>
             )}
+
           </div>
         </section>
 
         {/* Suggestions */}
         <div className="shrink-0 overflow-x-auto px-4 pb-3 sm:px-6">
           <div className="mx-auto flex max-w-2xl gap-2">
+
             <button
               onClick={() => sendMessage("I just want to talk.")}
               className="shrink-0 rounded-full border border-neutral-200 bg-white px-4 py-2.5 text-xs font-semibold"
@@ -210,12 +237,14 @@ export default function MoyoChat() {
             >
               Encourage me
             </button>
+
           </div>
         </div>
 
         {/* Composer */}
         <div className="shrink-0 px-4 pb-3 sm:px-6">
           <div className="mx-auto flex max-w-2xl items-end gap-2 rounded-[1.4rem] bg-white p-2 shadow-sm ring-1 ring-black/[0.03]">
+
             <textarea
               value={message}
               onChange={(e) => setMessage(e.target.value)}
@@ -238,14 +267,16 @@ export default function MoyoChat() {
             >
               <ArrowUp size={18} />
             </button>
+
           </div>
         </div>
 
         {/* Disclaimer */}
         <p className="shrink-0 px-6 pb-4 text-center text-[9px] leading-4 text-neutral-400 sm:text-[10px]">
-          MOYO is an AI and can make mistakes. It doesn't replace professional
-          or human support.
+          MOYO is an AI and can make mistakes. It doesn't replace
+          professional or human support.
         </p>
+
       </div>
     </main>
   );
