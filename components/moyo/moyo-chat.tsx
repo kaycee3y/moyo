@@ -1,18 +1,29 @@
 "use client";
 
-import { useState } from "react";
-import { ArrowLeft, ArrowUp, Plus, Target } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ArrowUp, History, Plus, Target } from "lucide-react";
 import { useRouter } from "next/navigation";
 import MoodFace from "./mood-face";
+import {
+  Conversation,
+  createConversation,
+  getConversations,
+  saveConversations,
+} from "@/lib/moyo-storage";
 
 type Mood = "calm" | "happy" | "sad" | "thinking" | "confused";
 
-const moods: Record<Mood, { label: string; color: string }> = {
-  calm: { label: "Calm", color: "#f3a6b8" },
-  happy: { label: "Happy", color: "#f8d878" },
-  sad: { label: "Sad", color: "#aaaee6" },
-  thinking: { label: "Thinking", color: "#c8b8ef" },
-  confused: { label: "Confused", color: "#a8dce8" },
+type Message = {
+  from: "user" | "moyo";
+  text: string;
+};
+
+const moods: Record<Mood, string> = {
+  calm: "Calm",
+  happy: "Happy",
+  sad: "Sad",
+  thinking: "Thinking",
+  confused: "Confused",
 };
 
 export default function MoyoChat() {
@@ -22,12 +33,34 @@ export default function MoyoChat() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const [messages, setMessages] = useState([
+  const [conversation, setConversation] =
+    useState<Conversation | null>(null);
+
+  const [messages, setMessages] = useState<Message[]>([
     {
       from: "moyo",
       text: "Hey. I'm here. What's on your mind?",
     },
   ]);
+
+  /* Create a conversation when the chat opens */
+  useEffect(() => {
+    const existing = getConversations();
+
+    const current = createConversation();
+
+    current.messages = [
+      {
+        from: "moyo",
+        text: "Hey. I'm here. What's on your mind?",
+        timestamp: Date.now(),
+      },
+    ];
+
+    setConversation(current);
+
+    saveConversations([current, ...existing]);
+  }, []);
 
   function detectMood(text: string): Mood {
     const value = text.toLowerCase();
@@ -67,19 +100,60 @@ export default function MoyoChat() {
     return "calm";
   }
 
+  function saveCurrentConversation(
+    updatedMessages: Message[]
+  ) {
+    if (!conversation) return;
+
+    const now = Date.now();
+
+    const updatedConversation: Conversation = {
+      ...conversation,
+      title:
+        updatedMessages.find((item) => item.from === "user")?.text.slice(
+          0,
+          40
+        ) || "New conversation",
+      updatedAt: now,
+      messages: updatedMessages.map((item) => ({
+        ...item,
+        timestamp: now,
+      })),
+    };
+
+    setConversation(updatedConversation);
+
+    const all = getConversations();
+
+    const withoutCurrent = all.filter(
+      (item) => item.id !== updatedConversation.id
+    );
+
+    saveConversations([
+      updatedConversation,
+      ...withoutCurrent,
+    ]);
+  }
+
   async function sendMessage(text = message) {
     const trimmed = text.trim();
 
     if (!trimmed || loading) return;
 
-    const updated = [
+    const updated: Message[] = [
       ...messages,
-      { from: "user" as const, text: trimmed },
+      {
+        from: "user",
+        text: trimmed,
+      },
     ];
 
     setMood(detectMood(trimmed));
     setMessages(updated);
     setMessage("");
+
+    saveCurrentConversation(updated);
+
     setLoading(true);
 
     try {
@@ -90,7 +164,10 @@ export default function MoyoChat() {
         },
         body: JSON.stringify({
           messages: updated.map((item) => ({
-            role: item.from === "user" ? "user" : "assistant",
+            role:
+              item.from === "user"
+                ? "user"
+                : "assistant",
             content: item.text,
           })),
         }),
@@ -102,24 +179,34 @@ export default function MoyoChat() {
         throw new Error(data.error);
       }
 
-      setMessages((previous) => [
-        ...previous,
+      const withReply: Message[] = [
+        ...updated,
         {
           from: "moyo",
           text: data.reply,
         },
-      ]);
+      ];
+
+      setMessages(withReply);
+      saveCurrentConversation(withReply);
     } catch {
-      setMessages((previous) => [
-        ...previous,
+      const withError: Message[] = [
+        ...updated,
         {
           from: "moyo",
           text: "I couldn't respond just now. Please try again.",
         },
-      ]);
+      ];
+
+      setMessages(withError);
+      saveCurrentConversation(withError);
     } finally {
       setLoading(false);
     }
+  }
+
+  function newConversation() {
+    router.push("/chat");
   }
 
   return (
@@ -129,34 +216,32 @@ export default function MoyoChat() {
         {/* Header */}
         <header className="flex shrink-0 items-center justify-between px-4 py-4 sm:px-6">
 
-          {/* History */}
           <button
             onClick={() => router.push("/history")}
             className="flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-sm transition hover:scale-105 sm:h-11 sm:w-11"
             aria-label="Conversation history"
           >
-            <span className="text-lg">☰</span>
+            <History size={18} />
           </button>
 
           <div className="text-lg font-extrabold tracking-[-0.06em]">
             MOYO
           </div>
 
-          {/* New conversation */}
           <button
-            onClick={() => router.push("/chat")}
+            onClick={newConversation}
             className="flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-sm transition hover:scale-105 sm:h-11 sm:w-11"
             aria-label="New conversation"
           >
             <Plus size={19} />
           </button>
+
         </header>
 
         {/* Character */}
         <section className="flex shrink-0 flex-col items-center px-4 pt-2 sm:pt-5">
           <MoodFace mood={mood} />
 
-          {/* Mood controls */}
           <div className="mt-2 flex max-w-full gap-2 overflow-x-auto px-2 pb-2">
             {(Object.keys(moods) as Mood[]).map((item) => (
               <button
@@ -168,7 +253,7 @@ export default function MoyoChat() {
                     : "bg-white text-neutral-500 shadow-sm"
                 }`}
               >
-                {moods[item].label}
+                {moods[item]}
               </button>
             ))}
           </div>
@@ -232,7 +317,9 @@ export default function MoyoChat() {
             </button>
 
             <button
-              onClick={() => sendMessage("I need some encouragement.")}
+              onClick={() =>
+                sendMessage("I need some encouragement.")
+              }
               className="shrink-0 rounded-full border border-neutral-200 bg-white px-4 py-2.5 text-xs font-semibold"
             >
               Encourage me
