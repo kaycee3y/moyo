@@ -1,7 +1,8 @@
 "use client";
 
 import { FormEvent, useMemo, useState, useEffect, useRef } from "react";
-import { Mic, Square, Volume2, Volume1 } from "lucide-react";
+import { Mic, Square, Volume2, Volume1, Target } from "lucide-react";
+import { useRouter } from "next/navigation";
 import MoodFace from "./mood-face";
 import { MoyoGoal } from "@/lib/moyo-goals";
 
@@ -53,6 +54,7 @@ function detectMood(text: string): Mood {
 }
 
 export default function MoyoChat({ activeGoal }: MoyoChatProps) {
+  const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -277,7 +279,7 @@ export default function MoyoChat({ activeGoal }: MoyoChatProps) {
     <main className="fixed inset-0 flex min-h-dvh flex-col overflow-hidden bg-[#faf9f7] text-neutral-900">
       {/* FIXED MOYO AREA */}
       <header className="shrink-0 px-5 pt-8 pb-4 sm:px-8">
-        <div className="mx-auto flex w-full max-w-3xl items-center justify-between">
+        <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3">
           <div>
             <p className="text-sm font-medium tracking-[0.18em] text-neutral-400">
               MOYO
@@ -285,7 +287,19 @@ export default function MoyoChat({ activeGoal }: MoyoChatProps) {
             <p className="mt-1 text-xs text-neutral-400">{moodLabel}</p>
           </div>
 
-          <MoodFace mood={faceMood} />
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => router.push("/goals")}
+              className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-2 text-sm font-semibold text-neutral-900 shadow-sm ring-1 ring-neutral-200"
+              aria-label="Open goals"
+            >
+              <Target size={15} />
+              Goals
+            </button>
+
+            <MoodFace mood={faceMood} />
+          </div>
         </div>
       </header>
 

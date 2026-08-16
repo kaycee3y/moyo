@@ -45,10 +45,11 @@ export default function GoalsPage() {
       Math.max(1, Number(days) || 30)
     );
 
-    const updated = [newGoal, ...goals];
-
-    setGoals(updated);
-    saveGoals(updated);
+    setGoals((prev) => {
+      const updated = [newGoal, ...prev];
+      saveGoals(updated);
+      return updated;
+    });
 
     setTitle("");
     setDescription("");
@@ -82,14 +83,14 @@ export default function GoalsPage() {
       const data = await response.json();
       const step = data.step;
 
-      // Update goal with step
-      const updated = goals.map((g) => {
-        if (g.id !== goal.id) return g;
-        return updateGoalStep(g, step);
+      setGoals((prev) => {
+        const updated = prev.map((g) => {
+          if (g.id !== goal.id) return g;
+          return updateGoalStep(g, step);
+        });
+        saveGoals(updated);
+        return updated;
       });
-
-      setGoals(updated);
-      saveGoals(updated);
     } catch (error) {
       console.error("Step generation error:", error);
     } finally {
@@ -102,36 +103,38 @@ export default function GoalsPage() {
   }
 
   function completeToday(goalId: string) {
-    const updated = goals.map((goal) => {
-      if (goal.id !== goalId) return goal;
+    setGoals((prev) => {
+      const updated = prev.map((goal) => {
+        if (goal.id !== goalId) return goal;
 
-      if (goal.completedDays.includes(goal.currentDay)) {
-        return goal;
-      }
+        if (goal.completedDays.includes(goal.currentDay)) {
+          return goal;
+        }
 
-      const newGoal = {
-        ...goal,
-        completedDays: [
-          ...goal.completedDays,
-          goal.currentDay,
-        ],
-        currentDay: Math.min(
-          goal.currentDay + 1,
-          goal.totalDays
-        ),
-        updatedAt: Date.now(),
-      };
+        const newGoal = {
+          ...goal,
+          completedDays: [
+            ...goal.completedDays,
+            goal.currentDay,
+          ],
+          currentDay: Math.min(
+            goal.currentDay + 1,
+            goal.totalDays
+          ),
+          updatedAt: Date.now(),
+        };
 
-      // Generate next step for the new day
-      if (newGoal.currentDay <= newGoal.totalDays) {
-        setTimeout(() => generateFirstStep(newGoal), 500);
-      }
+        // Generate next step for the new day
+        if (newGoal.currentDay <= newGoal.totalDays) {
+          setTimeout(() => generateFirstStep(newGoal), 500);
+        }
 
-      return newGoal;
+        return newGoal;
+      });
+
+      saveGoals(updated);
+      return updated;
     });
-
-    setGoals(updated);
-    saveGoals(updated);
   }
 
   function handleNeedMoreTime(goalId: string) {
@@ -141,16 +144,17 @@ export default function GoalsPage() {
   function submitCheckInReason(reason: CheckInReason) {
     if (!checkInGoalId) return;
 
-    const updated = goals.map((goal) => {
-      if (goal.id !== checkInGoalId) return goal;
-      return updateGoalCheckInReason(goal, reason);
+    setGoals((prev) => {
+      const updated = prev.map((goal) => {
+        if (goal.id !== checkInGoalId) return goal;
+        return updateGoalCheckInReason(goal, reason);
+      });
+
+      saveGoals(updated);
+      return updated;
     });
 
-    setGoals(updated);
-    saveGoals(updated);
-
-    // Generate adapted step based on reason
-    const goal = updated.find((g) => g.id === checkInGoalId);
+    const goal = goals.find((g) => g.id === checkInGoalId);
     if (goal) {
       generateFirstStepWithContext(goal, reason);
     }
@@ -189,14 +193,14 @@ export default function GoalsPage() {
       const data = await response.json();
       const step = data.step;
 
-      // Update goal with adapted step
-      const updated = goals.map((g) => {
-        if (g.id !== goal.id) return g;
-        return updateGoalStep(g, step);
+      setGoals((prev) => {
+        const updated = prev.map((g) => {
+          if (g.id !== goal.id) return g;
+          return updateGoalStep(g, step);
+        });
+        saveGoals(updated);
+        return updated;
       });
-
-      setGoals(updated);
-      saveGoals(updated);
     } catch (error) {
       console.error("Step generation error:", error);
     } finally {
@@ -334,7 +338,7 @@ export default function GoalsPage() {
                           {goal.firstStep && (
                             <div className="rounded-2xl bg-neutral-50 px-4 py-3.5 text-sm leading-5">
                               <p className="font-semibold text-neutral-900">
-                                Your step for today:
+                                Today&apos;s step
                               </p>
                               <p className="mt-2 text-neutral-700">
                                 {goal.firstStep}
