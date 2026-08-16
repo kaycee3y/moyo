@@ -1,370 +1,411 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { ArrowUp, History, Plus, Target } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { FormEvent, useMemo, useState, useEffect, useRef } from "react";
+import { Mic, Square, Volume2, Volume1 } from "lucide-react";
 import MoodFace from "./mood-face";
-import {
-  Conversation,
-  createConversation,
-  getConversations,
-  saveConversations,
-} from "@/lib/moyo-storage";
+import { MoyoGoal } from "@/lib/moyo-goals";
 
-type Mood = "calm" | "happy" | "sad" | "thinking" | "confused";
+type Mood = "calm" | "happy" | "sad" | "concerned" | "thinking";
+
+type VoiceState = "idle" | "listening" | "processing" | "speaking";
 
 type Message = {
-  from: "user" | "moyo";
-  text: string;
+  role: "user" | "moyo";
+  content: string;
 };
 
-const moods: Record<Mood, string> = {
-  calm: "Calm",
-  happy: "Happy",
-  sad: "Sad",
-  thinking: "Thinking",
-  confused: "Confused",
-};
+interface MoyoChatProps {
+  activeGoal?: MoyoGoal;
+}
 
-export default function MoyoChat() {
-  const router = useRouter();
+function detectMood(text: string): Mood {
+  const value = text.toLowerCase();
 
-  const [mood, setMood] = useState<Mood>("calm");
-  const [message, setMessage] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  const [conversation, setConversation] =
-    useState<Conversation | null>(null);
-
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      from: "moyo",
-      text: "Hey. I'm here. What's on your mind?",
-    },
-  ]);
-
-  /* Create a conversation when the chat opens */
-  useEffect(() => {
-    const existing = getConversations();
-
-    const current = createConversation();
-
-    current.messages = [
-      {
-        from: "moyo",
-        text: "Hey. I'm here. What's on your mind?",
-        timestamp: Date.now(),
-      },
-    ];
-
-    setConversation(current);
-
-    saveConversations([current, ...existing]);
-  }, []);
-
-  function detectMood(text: string): Mood {
-    const value = text.toLowerCase();
-
-    if (
-      /happy|excited|great|amazing|wonderful|joy|love|proud|good news/.test(
-        value
-      )
-    ) {
-      return "happy";
-    }
-
-    if (
-      /sad|cry|crying|hurt|lonely|upset|depressed|heartbroken|terrible|awful/.test(
-        value
-      )
-    ) {
-      return "sad";
-    }
-
-    if (
-      /confused|confusing|don't understand|what does|why does|unsure/.test(
-        value
-      )
-    ) {
-      return "confused";
-    }
-
-    if (
-      /how do i|how can i|should i|what should|plan|goal|start|figure out/.test(
-        value
-      )
-    ) {
-      return "thinking";
-    }
-
-    return "calm";
+  if (
+    /happy|great|excited|amazing|good news|love|wonderful|proud|glad/.test(
+      value
+    )
+  ) {
+    return "happy";
   }
 
-  function saveCurrentConversation(
-    updatedMessages: Message[]
+  if (
+    /sad|lonely|hurt|cry|crying|depressed|heartbroken|upset|miserable/.test(
+      value
+    )
   ) {
-    if (!conversation) return;
+    return "sad";
+  }
 
-    const now = Date.now();
+  if (
+    /stress|stressed|angry|anxious|anxiety|worried|overwhelmed|frustrated|tired/.test(
+      value
+    )
+  ) {
+    return "concerned";
+  }
 
-    const updatedConversation: Conversation = {
-      ...conversation,
-      title:
-        updatedMessages.find((item) => item.from === "user")?.text.slice(
-          0,
-          40
-        ) || "New conversation",
-      updatedAt: now,
-      messages: updatedMessages.map((item) => ({
-        ...item,
-        timestamp: now,
-      })),
+  if (/think|thinking|confused|wonder|maybe|don't know|not sure/.test(value)) {
+    return "thinking";
+  }
+
+  return "calm";
+}
+
+export default function MoyoChat({ activeGoal }: MoyoChatProps) {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [mood, setMood] = useState<Mood>("calm");
+
+  // Voice states
+  const [voiceState, setVoiceState] = useState<VoiceState>("idle");
+  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+
+  // Refs for voice features
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const audioElementRef = useRef<HTMLAudioElement | null>(null);
+  const synthRef = useRef<SpeechSynthesisUtterance | null>(null);
+
+  const hasMessages = messages.length > 0;
+  const faceMood: "calm" | "happy" | "sad" | "thinking" | "confused" =
+    mood === "concerned" ? "thinking" : mood;
+
+  const moodLabel = useMemo(() => {
+    if (mood === "happy") return "Moyo feels happy";
+    if (mood === "sad") return "Moyo is here with you";
+    if (mood === "concerned") return "Moyo is listening";
+    if (mood === "thinking") return "Moyo is thinking";
+    return "Moyo is here";
+  }, [mood]);
+
+  async function startRecording() {
+    try {
+      setVoiceState("listening");
+      audioChunksRef.current = [];
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+      });
+
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+
+      mediaRecorder.ondataavailable = (event) => {
+        audioChunksRef.current.push(event.data);
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, {
+          type: "audio/webm",
+        });
+
+        stream.getTracks().forEach((track) => track.stop());
+
+        await transcribeAudio(audioBlob);
+      };
+
+      mediaRecorder.start();
+    } catch (error) {
+      console.error("Microphone error:", error);
+      setVoiceState("idle");
+    }
+  }
+
+  function stopRecording() {
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.stop();
+      setVoiceState("processing");
+    }
+  }
+
+  async function transcribeAudio(audioBlob: Blob) {
+    try {
+      const formData = new FormData();
+      formData.append("audio", audioBlob, "audio.webm");
+
+      const response = await fetch("/api/voice/transcribe", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error("Could not transcribe audio");
+      }
+
+      const data = await response.json();
+      const transcript = data.transcript;
+
+      if (transcript) {
+        setInput(transcript);
+        setVoiceState("idle");
+      }
+    } catch (error) {
+      console.error("Transcription error:", error);
+      setVoiceState("idle");
+    }
+  }
+
+  function speakResponse(text: string) {
+    // Cancel any ongoing speech
+    window.speechSynthesis.cancel();
+
+    setVoiceState("speaking");
+    setIsPlayingAudio(true);
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 1;
+    utterance.pitch = 1;
+    utterance.volume = 1;
+
+    utterance.onend = () => {
+      setVoiceState("idle");
+      setIsPlayingAudio(false);
     };
 
-    setConversation(updatedConversation);
+    utterance.onerror = () => {
+      setVoiceState("idle");
+      setIsPlayingAudio(false);
+    };
 
-    const all = getConversations();
-
-    const withoutCurrent = all.filter(
-      (item) => item.id !== updatedConversation.id
-    );
-
-    saveConversations([
-      updatedConversation,
-      ...withoutCurrent,
-    ]);
+    synthRef.current = utterance;
+    window.speechSynthesis.speak(utterance);
   }
 
-  async function sendMessage(text = message) {
-    const trimmed = text.trim();
+  function stopAudio() {
+    window.speechSynthesis.cancel();
+    if (audioElementRef.current) {
+      audioElementRef.current.pause();
+    }
+    setVoiceState("idle");
+    setIsPlayingAudio(false);
+  }
 
-    if (!trimmed || loading) return;
+  async function handleSendMessage(event: FormEvent) {
+    event.preventDefault();
 
-    const updated: Message[] = [
-      ...messages,
-      {
-        from: "user",
-        text: trimmed,
-      },
-    ];
+    const text = input.trim();
+    if (!text || loading) return;
 
-    setMood(detectMood(trimmed));
-    setMessages(updated);
-    setMessage("");
+    const nextMood = detectMood(text);
+    setMood(nextMood);
 
-    saveCurrentConversation(updated);
+    const userMessage = { role: "user" as const, content: text };
+    const nextMessages = [...messages, userMessage];
 
+    setMessages(nextMessages);
+    setInput("");
     setLoading(true);
 
     try {
+      const payloadMessages = nextMessages.map((message) => ({
+        role: message.role === "moyo" ? "assistant" : message.role,
+        content: message.content,
+      }));
+
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          messages: updated.map((item) => ({
-            role:
-              item.from === "user"
-                ? "user"
-                : "assistant",
-            content: item.text,
-          })),
+          messages: payloadMessages,
+          goal: activeGoal
+            ? {
+                title: activeGoal.title,
+                description: activeGoal.description,
+                currentDay: activeGoal.currentDay,
+                totalDays: activeGoal.totalDays,
+                completedDays: activeGoal.completedDays.length,
+                currentStep: activeGoal.firstStep,
+                lastCheckInReason: activeGoal.lastCheckInReason,
+              }
+            : undefined,
         }),
       });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error);
+      let data: { reply?: string; error?: string } = {};
+      try {
+        data = await response.json();
+      } catch {
+        data = {};
       }
 
-      const withReply: Message[] = [
-        ...updated,
-        {
-          from: "moyo",
-          text: data.reply,
-        },
-      ];
+      if (!response.ok) {
+        throw new Error(data.error ?? "MOYO couldn't respond right now.");
+      }
 
-      setMessages(withReply);
-      saveCurrentConversation(withReply);
-    } catch {
-      const withError: Message[] = [
-        ...updated,
-        {
-          from: "moyo",
-          text: "I couldn't respond just now. Please try again.",
-        },
-      ];
+      const reply =
+        typeof data.reply === "string" && data.reply.trim()
+          ? data.reply.trim()
+          : (() => {
+              throw new Error(data.error ?? "No reply received.");
+            })();
 
-      setMessages(withError);
-      saveCurrentConversation(withError);
+      setMessages((current) => [
+        ...current,
+        { role: "moyo", content: reply },
+      ]);
+
+      setMood(detectMood(reply));
+
+      // Speak the reply if we're in voice mode
+      if (voiceState !== "idle" && voiceState !== "speaking") {
+        // Only auto-speak if the user sent a voice message
+        // speakResponse(reply);
+      }
+    } catch (error) {
+      const fallbackMessage =
+        error instanceof Error && error.message
+          ? error.message
+          : "I'm having a little trouble connecting right now. I'm still here.";
+
+      setMessages((current) => [
+        ...current,
+        {
+          role: "moyo",
+          content: fallbackMessage,
+        },
+      ]);
     } finally {
       setLoading(false);
     }
   }
 
-  function newConversation() {
-    router.push("/chat");
-  }
-
   return (
-    <main className="min-h-[100dvh] bg-[#faf9f7] text-[#151515]">
-      <div className="mx-auto flex min-h-[100dvh] w-full max-w-3xl flex-col">
-
-        {/* Header */}
-        <header className="flex shrink-0 items-center justify-between px-4 py-4 sm:px-6">
-
-          <button
-            onClick={() => router.push("/history")}
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-sm transition hover:scale-105 sm:h-11 sm:w-11"
-            aria-label="Conversation history"
-          >
-            <History size={18} />
-          </button>
-
-          <div className="text-lg font-extrabold tracking-[-0.06em]">
-            MOYO
+    <main className="fixed inset-0 flex min-h-dvh flex-col overflow-hidden bg-[#faf9f7] text-neutral-900">
+      {/* FIXED MOYO AREA */}
+      <header className="shrink-0 px-5 pt-8 pb-4 sm:px-8">
+        <div className="mx-auto flex w-full max-w-3xl items-center justify-between">
+          <div>
+            <p className="text-sm font-medium tracking-[0.18em] text-neutral-400">
+              MOYO
+            </p>
+            <p className="mt-1 text-xs text-neutral-400">{moodLabel}</p>
           </div>
 
-          <button
-            onClick={newConversation}
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-sm transition hover:scale-105 sm:h-11 sm:w-11"
-            aria-label="New conversation"
-          >
-            <Plus size={19} />
-          </button>
+          <MoodFace mood={faceMood} />
+        </div>
+      </header>
 
-        </header>
+      {/* ONLY THIS AREA SCROLLS */}
+      <section className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 sm:px-8">
+        <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col justify-end gap-4 py-6">
+          {!hasMessages && (
+            <div className="my-auto flex flex-col items-center justify-center text-center">
+              <p className="text-2xl font-medium tracking-tight sm:text-3xl">
+                What&apos;s on your mind?
+              </p>
+              <p className="mt-2 max-w-sm text-sm leading-6 text-neutral-400">
+                You don&apos;t have to explain everything at once.
+              </p>
+            </div>
+          )}
 
-        {/* Character */}
-        <section className="flex shrink-0 flex-col items-center px-4 pt-2 sm:pt-5">
-          <MoodFace mood={mood} />
-
-          <div className="mt-2 flex max-w-full gap-2 overflow-x-auto px-2 pb-2">
-            {(Object.keys(moods) as Mood[]).map((item) => (
-              <button
-                key={item}
-                onClick={() => setMood(item)}
-                className={`shrink-0 rounded-full px-3.5 py-2 text-[11px] font-bold transition sm:px-4 sm:text-xs ${
-                  mood === item
-                    ? "bg-black text-white"
-                    : "bg-white text-neutral-500 shadow-sm"
-                }`}
-              >
-                {moods[item]}
-              </button>
-            ))}
-          </div>
-        </section>
-
-        {/* Conversation */}
-        <section className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
-          <div className="mx-auto max-w-2xl space-y-3">
-
-            {messages.map((item, index) => (
+          {messages.map((message, index) => (
+            <div
+              key={`${message.role}-${index}`}
+              className={`flex ${
+                message.role === "user" ? "justify-end" : "justify-start"
+              }`}
+            >
               <div
-                key={index}
-                className={`flex ${
-                  item.from === "user"
-                    ? "justify-end"
-                    : "justify-start"
+                className={`max-w-[85%] rounded-[24px] px-5 py-3.5 text-[15px] leading-6 sm:max-w-[70%] ${
+                  message.role === "user"
+                    ? "rounded-br-md bg-neutral-900 text-white"
+                    : "rounded-bl-md bg-white text-neutral-800 shadow-sm ring-1 ring-neutral-100"
                 }`}
               >
-                <div
-                  className={`max-w-[88%] px-4 py-3 text-sm leading-6 sm:max-w-[75%] sm:px-5 ${
-                    item.from === "user"
-                      ? "rounded-[1.4rem] rounded-br-md bg-black text-white"
-                      : "rounded-[1.4rem] rounded-bl-md bg-white shadow-sm"
-                  }`}
-                >
-                  {item.text}
-                </div>
+                {message.content}
               </div>
-            ))}
+            </div>
+          ))}
 
-            {loading && (
-              <div className="flex justify-start">
-                <div className="rounded-[1.4rem] rounded-bl-md bg-white px-5 py-3 text-sm text-neutral-400 shadow-sm">
-                  <span className="animate-pulse">
-                    MOYO is thinking...
-                  </span>
+          {loading && (
+            <div className="flex justify-start">
+              <div className="rounded-[24px] rounded-bl-md bg-white px-5 py-4 shadow-sm ring-1 ring-neutral-100">
+                <div className="flex gap-1.5">
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-neutral-300" />
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-neutral-300 [animation-delay:120ms]" />
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-neutral-300 [animation-delay:240ms]" />
                 </div>
               </div>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* FIXED INPUT */}
+      <footer className="shrink-0 px-5 pb-5 pt-3 sm:px-8 sm:pb-8">
+        <form
+          onSubmit={handleSendMessage}
+          className="mx-auto flex w-full max-w-3xl items-end gap-2 rounded-[28px] bg-white p-2 shadow-sm ring-1 ring-neutral-200"
+        >
+          {/* Voice control button */}
+          <button
+            type="button"
+            onClick={
+              voiceState === "listening" ? stopRecording : startRecording
+            }
+            disabled={loading || isPlayingAudio}
+            className={`shrink-0 h-10 w-10 rounded-full flex items-center justify-center transition-colors ${
+              voiceState === "listening"
+                ? "bg-red-500 text-white"
+                : voiceState === "processing"
+                  ? "bg-yellow-500 text-white"
+                  : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200 disabled:opacity-50"
+            }`}
+            aria-label={
+              voiceState === "listening" ? "Stop recording" : "Start recording"
+            }
+          >
+            {voiceState === "listening" ? (
+              <Square size={16} className="fill-current" />
+            ) : (
+              <Mic size={16} />
             )}
+          </button>
 
+          <input
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            placeholder="Talk to Moyo..."
+            disabled={loading || voiceState === "listening"}
+            className="min-w-0 flex-1 bg-transparent px-4 py-3 text-[15px] outline-none placeholder:text-neutral-400"
+          />
+
+          {/* Send button */}
+          <button
+            type="submit"
+            disabled={!input.trim() || loading}
+            className="shrink-0 rounded-full bg-neutral-900 px-5 py-3 text-sm font-medium text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-30"
+          >
+            Send
+          </button>
+
+          {/* Audio playback button */}
+          {isPlayingAudio && (
+            <button
+              type="button"
+              onClick={stopAudio}
+              className="shrink-0 h-10 w-10 rounded-full flex items-center justify-center bg-red-500 text-white transition-colors hover:bg-red-600"
+              aria-label="Stop audio"
+            >
+              <Square size={16} className="fill-current" />
+            </button>
+          )}
+        </form>
+
+        {/* Voice status indicator */}
+        {voiceState === "processing" && (
+          <div className="mt-2 text-center text-xs text-neutral-500">
+            Transcribing audio...
           </div>
-        </section>
+        )}
+      </footer>
 
-        {/* Suggestions */}
-        <div className="shrink-0 overflow-x-auto px-4 pb-3 sm:px-6">
-          <div className="mx-auto flex max-w-2xl gap-2">
 
-            <button
-              onClick={() => sendMessage("I just want to talk.")}
-              className="shrink-0 rounded-full border border-neutral-200 bg-white px-4 py-2.5 text-xs font-semibold"
-            >
-              Just want to talk
-            </button>
-
-            <button
-              onClick={() => sendMessage("Help me set a goal.")}
-              className="flex shrink-0 items-center gap-2 rounded-full border border-neutral-200 bg-white px-4 py-2.5 text-xs font-semibold"
-            >
-              <Target size={14} />
-              Set a goal
-            </button>
-
-            <button
-              onClick={() =>
-                sendMessage("I need some encouragement.")
-              }
-              className="shrink-0 rounded-full border border-neutral-200 bg-white px-4 py-2.5 text-xs font-semibold"
-            >
-              Encourage me
-            </button>
-
-          </div>
-        </div>
-
-        {/* Composer */}
-        <div className="shrink-0 px-4 pb-3 sm:px-6">
-          <div className="mx-auto flex max-w-2xl items-end gap-2 rounded-[1.4rem] bg-white p-2 shadow-sm ring-1 ring-black/[0.03]">
-
-            <textarea
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  sendMessage();
-                }
-              }}
-              placeholder="Talk to MOYO..."
-              rows={1}
-              className="max-h-28 min-w-0 flex-1 resize-none bg-transparent px-3 py-3 text-sm outline-none placeholder:text-neutral-400"
-            />
-
-            <button
-              onClick={() => sendMessage()}
-              disabled={loading || !message.trim()}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-black text-white transition hover:scale-105 disabled:opacity-30 sm:h-11 sm:w-11"
-              aria-label="Send message"
-            >
-              <ArrowUp size={18} />
-            </button>
-
-          </div>
-        </div>
-
-        {/* Disclaimer */}
-        <p className="shrink-0 px-6 pb-4 text-center text-[9px] leading-4 text-neutral-400 sm:text-[10px]">
-          MOYO is an AI and can make mistakes. It doesn't replace
-          professional or human support.
-        </p>
-
-      </div>
     </main>
   );
 }

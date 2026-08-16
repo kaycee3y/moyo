@@ -32,6 +32,7 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const messages = body.messages;
+    const goal = body.goal;
 
     if (!Array.isArray(messages)) {
       return NextResponse.json(
@@ -49,6 +50,35 @@ export async function POST(request: Request) {
       );
     }
 
+    let systemPrompt = SYSTEM_PROMPT;
+
+    // Add goal context if provided
+    if (goal) {
+      systemPrompt += `\n\nCURRENT GOAL CONTEXT:
+- Goal: "${goal.title}"
+- Description: ${goal.description || "No description provided"}
+- Progress: Day ${goal.currentDay} of ${goal.totalDays}
+- Completed: ${goal.completedDays} days
+- Today's step: ${goal.currentStep || "Not yet generated"}`;
+
+      if (goal.lastCheckInReason) {
+// @ts-expect-error reason is validated by the API
+        const reasonText = {
+          "too-difficult": "the step was too difficult",
+          "distracted": "they were distracted",
+          "too-tired": "they were too tired",
+          "something-came-up": "something came up",
+        }[goal.lastCheckInReason];
+
+        systemPrompt += `\n- Last check-in reason: ${reasonText}`;
+        systemPrompt +=
+          "\n\nBased on their feedback, adapt your responses to make suggestions smaller and more manageable.";
+      }
+
+      systemPrompt +=
+        "\n\nWhen the user asks about their goal or needs help with it, provide supportive, personalized guidance.";
+    }
+
     const response = await fetch(
       "https://api.groq.com/openai/v1/chat/completions",
       {
@@ -60,7 +90,7 @@ export async function POST(request: Request) {
         body: JSON.stringify({
           model: "llama-3.3-70b-versatile",
           messages: [
-            { role: "system", content: SYSTEM_PROMPT },
+            { role: "system", content: systemPrompt },
             ...messages.slice(-12),
           ],
           temperature: 0.7,
